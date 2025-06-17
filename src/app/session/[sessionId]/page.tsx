@@ -9,10 +9,11 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { generateQuestions } from '@/ai/flows/generate-questions';
 import { useToast } from '@/hooks/use-toast';
 import { nanoid } from 'nanoid';
-import { Users, Play, ArrowRight, Loader2, MessageSquare, Crown } from 'lucide-react';
+import { Users, Play, ArrowRight, Loader2, MessageSquare, Crown, Info } from 'lucide-react';
 
 const MIN_PLAYERS = 2; // Minimum players to start the game
 
@@ -131,14 +132,11 @@ export default function SessionPage() {
       const existingAnswers = prev.allAnswers[currentQuestion.id] || [];
       const updatedAnswersForQuestion = [...existingAnswers.filter(a => a.playerId !== currentPlayerId), newAnswer];
       
-      // Simple client-side simulation: check if all players have answered
-      // In a real app, this would be server-driven or use a more robust client-side check
       const allPlayersAnswered = prev.players.every(p => 
         updatedAnswersForQuestion.some(ans => ans.playerId === p.id)
       );
 
       if (allPlayersAnswered) {
-        // All players answered this question. Move to next or results.
         if (prev.currentQuestionIndex < prev.questions.length - 1) {
           return {
             ...prev,
@@ -146,12 +144,10 @@ export default function SessionPage() {
             currentQuestionIndex: prev.currentQuestionIndex + 1,
           };
         } else {
-          // Game finished
           router.push(`/session/${sessionId}/results`);
-          return { ...prev, status: 'results' }; // Also update status though navigation happens
+          return { ...prev, status: 'results' }; 
         }
       } else {
-        // Not all players answered yet, just record this player's answer
         toast({ title: "Answer Submitted!", description: "Waiting for other players..." });
         return {
           ...prev,
@@ -176,7 +172,6 @@ export default function SessionPage() {
     );
   }
 
-  // Check if current user is the host (first player for simplicity)
   const isHost = currentPlayerId && session.players.length > 0 && session.players[0].id === currentPlayerId;
 
   if (session.status === 'lobby') {
@@ -189,6 +184,14 @@ export default function SessionPage() {
             <p className="text-sm text-muted-foreground">Share this ID with your friends to join!</p>
           </CardHeader>
           <CardContent className="space-y-6">
+            <Alert>
+              <Info className="h-4 w-4" />
+              <AlertTitle>Local Session Note</AlertTitle>
+              <AlertDescription>
+                Currently, game sessions are stored locally in your browser using localStorage. This means data isn't shared with friends on other devices. For true multi-device play, a real-time database (like Firebase) is needed.
+              </AlertDescription>
+            </Alert>
+
             {!currentPlayerId || !session.players.find(p => p.id === currentPlayerId) ? (
               <div className="space-y-2">
                 <Input
@@ -312,9 +315,8 @@ export default function SessionPage() {
     );
   }
 
-  // Fallback or if status is 'results' but page hasn't navigated yet
   if (session.status === 'results') {
-     router.push(`/session/${sessionId}/results`); // Ensure navigation
+     router.push(`/session/${sessionId}/results`); 
      return (
         <div className="flex justify-center items-center h-full">
             <Loader2 className="w-12 h-12 animate-spin text-primary" />
