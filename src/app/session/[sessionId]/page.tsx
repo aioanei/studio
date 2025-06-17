@@ -1,6 +1,7 @@
+
 'use client';
 
-import { useState, useEffect, useCallback } } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import type { GameSession, Player, Question, PlayerAnswer, GameStatus } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -96,7 +97,7 @@ export default function SessionPage() {
     setIsLoading(true);
     try {
       const playerNames = session.players.map(p => p.name);
-      const numQuestions = playerNames.length * 2;
+      const numQuestions = playerNames.length * 2; // Generate 2 questions per player
       const aiResult = await generateQuestions({ playerNames, numQuestions });
       
       const questions: Question[] = aiResult.questions.map(qText => ({ id: nanoid(8), text: qText }));
