@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState } from 'react';
@@ -13,14 +14,14 @@ export default function HomePage() {
   const router = useRouter();
 
   const handleCreateSession = () => {
-    const newSessionId = nanoid(6); // Generate a 6-character ID
+    const newSessionId = nanoid(6).toUpperCase(); // Generate a 6-character uppercase ID
     router.push(`/session/${newSessionId}`);
   };
 
   const handleJoinSession = (e: React.FormEvent) => {
     e.preventDefault();
     if (joinSessionId.trim()) {
-      router.push(`/session/${joinSessionId.trim()}`);
+      router.push(`/session/${joinSessionId.trim()}`); // Already uppercased by onChange
     }
   };
 
@@ -80,6 +81,7 @@ export default function HomePage() {
                 placeholder="Enter Game ID (e.g., ABC123)"
                 className="text-lg py-6"
                 aria-label="Game ID to join"
+                maxLength={6}
               />
               <Button type="submit" className="w-full text-lg py-6 bg-accent hover:bg-accent/90" disabled={!joinSessionId.trim()}>
                 Join Session

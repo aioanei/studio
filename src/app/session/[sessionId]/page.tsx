@@ -21,7 +21,8 @@ export default function SessionPage() {
   const params = useParams();
   const router = useRouter();
   const { toast } = useToast();
-  const sessionId = params.sessionId as string;
+  // Ensure sessionId is treated as uppercase consistently
+  const sessionId = (params.sessionId as string)?.toUpperCase();
 
   const [session, setSession] = useState<GameSession | null>(null);
   const [playerName, setPlayerName] = useState('');
@@ -124,11 +125,15 @@ export default function SessionPage() {
     setIsSubmitting(true);
 
     const currentQuestion = session.questions[session.currentQuestionIndex];
-    if (!currentQuestion) return;
+    if (!currentQuestion) {
+      setIsSubmitting(false);
+      return;
+    }
 
     const newAnswer: PlayerAnswer = { playerId: currentPlayerId, chosenPlayerId };
 
     updateSession(prev => {
+      if (!prev) return prev;
       const existingAnswers = prev.allAnswers[currentQuestion.id] || [];
       const updatedAnswersForQuestion = [...existingAnswers.filter(a => a.playerId !== currentPlayerId), newAnswer];
       
@@ -138,6 +143,7 @@ export default function SessionPage() {
 
       if (allPlayersAnswered) {
         if (prev.currentQuestionIndex < prev.questions.length - 1) {
+           toast({ title: "Round Complete!", description: "Moving to the next question..." });
           return {
             ...prev,
             allAnswers: { ...prev.allAnswers, [currentQuestion.id]: updatedAnswersForQuestion },
@@ -145,7 +151,11 @@ export default function SessionPage() {
           };
         } else {
           router.push(`/session/${sessionId}/results`);
-          return { ...prev, status: 'results' }; 
+          return { 
+            ...prev,
+            allAnswers: { ...prev.allAnswers, [currentQuestion.id]: updatedAnswersForQuestion }, 
+            status: 'results' 
+          }; 
         }
       } else {
         toast({ title: "Answer Submitted!", description: "Waiting for other players..." });
