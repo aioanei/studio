@@ -2,8 +2,8 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import type { GameSession, Player, Question, PlayerAnswer, GameStatus } from '@/types';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import type { GameSession, Player, Question, PlayerAnswer, GameStatus, QuestionDifficulty } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -13,35 +13,49 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { generateQuestions } from '@/ai/flows/generate-questions';
 import { useToast } from '@/hooks/use-toast';
 import { nanoid } from 'nanoid';
-import { Users, Play, ArrowRight, Loader2, MessageSquare, Crown, Info } from 'lucide-react';
+import { Users, Play, Loader2, MessageSquare, Crown, Info } from 'lucide-react';
 
 const MIN_PLAYERS = 2; // Minimum players to start the game
 
 export default function SessionPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast();
-  // Ensure sessionId is treated as uppercase consistently
+  
   const sessionId = (params.sessionId as string)?.toUpperCase();
 
   const [session, setSession] = useState<GameSession | null>(null);
   const [playerName, setPlayerName] = useState('');
-  const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null); // ID of the user using this browser
-  const [isLoading, setIsLoading] = useState(false); // For AI call or other async ops
+  const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const storageKey = `hotseat-session-${sessionId}`;
   const playerStorageKey = `hotseat-player-${sessionId}`;
 
-  // Load session and current player from localStorage
   useEffect(() => {
     if (!sessionId) return;
 
     const storedSession = localStorage.getItem(storageKey);
+    const difficultyFromQuery = searchParams.get('difficulty') as QuestionDifficulty | null;
+
     if (storedSession) {
-      setSession(JSON.parse(storedSession));
+      const parsedSession = JSON.parse(storedSession) as GameSession;
+      // If difficulty is in query and session doesn't have it or it's different, update it (host starting new game type)
+      // Or if a player joins and the session already has a difficulty.
+      if (difficultyFromQuery && parsedSession.difficulty !== difficultyFromQuery) {
+         // This might happen if host changes difficulty and reloads, or if URL is manually crafted.
+         // For now, let's assume query param is authoritative if the session is being newly "created" or "joined" by host.
+         // If a non-host joins, the existing session difficulty should persist.
+         // This logic gets simpler with a central DB.
+         const isPlayerAlreadyInSession = parsedSession.players.some(p => p.id === localStorage.getItem(playerStorageKey));
+         if (!isPlayerAlreadyInSession || parsedSession.players.length === 0) {
+            parsedSession.difficulty = difficultyFromQuery;
+         }
+      }
+      setSession(parsedSession);
     } else {
-      // Initialize new session if not found (e.g., first visit)
       setSession({
         id: sessionId,
         players: [],
@@ -49,6 +63,7 @@ export default function SessionPage() {
         allAnswers: {},
         currentQuestionIndex: 0,
         status: 'lobby',
+        difficulty: difficultyFromQuery || 'family-friendly',
       });
     }
 
@@ -56,9 +71,8 @@ export default function SessionPage() {
     if (storedPlayerId) {
       setCurrentPlayerId(storedPlayerId);
     }
-  }, [sessionId, storageKey, playerStorageKey]);
+  }, [sessionId, storageKey, playerStorageKey, searchParams]);
 
-  // Save session to localStorage whenever it changes
   useEffect(() => {
     if (session) {
       localStorage.setItem(storageKey, JSON.stringify(session));
@@ -67,7 +81,7 @@ export default function SessionPage() {
 
   const updateSession = useCallback((newSessionData: Partial<GameSession> | ((prev: GameSession) => GameSession)) => {
     setSession(prev => {
-      if (!prev) return null; // Should not happen if initialized
+      if (!prev) return null;
       const updated = typeof newSessionData === 'function' ? newSessionData(prev) : { ...prev, ...newSessionData };
       return updated;
     });
@@ -99,8 +113,8 @@ export default function SessionPage() {
     setIsLoading(true);
     try {
       const playerNames = session.players.map(p => p.name);
-      const numQuestions = playerNames.length * 2; // Generate 2 questions per player
-      const aiResult = await generateQuestions({ playerNames, numQuestions });
+      const numQuestions = playerNames.length * 2;
+      const aiResult = await generateQuestions({ playerNames, numQuestions, difficulty: session.difficulty });
       
       const questions: Question[] = aiResult.questions.map(qText => ({ id: nanoid(8), text: qText }));
       
@@ -109,7 +123,7 @@ export default function SessionPage() {
         questions,
         status: 'playing',
         currentQuestionIndex: 0,
-        allAnswers: {}, // Reset answers
+        allAnswers: {},
       }));
       toast({ title: "Game Started!", description: "Let the fun begin!" });
     } catch (error) {
@@ -172,7 +186,6 @@ export default function SessionPage() {
   const currentPlayerHasAnswered = session && currentQuestion && currentPlayerId &&
     (session.allAnswers[currentQuestion.id] || []).some(ans => ans.playerId === currentPlayerId);
 
-
   if (!session) {
     return (
       <div className="flex justify-center items-center h-full">
@@ -183,6 +196,11 @@ export default function SessionPage() {
   }
 
   const isHost = currentPlayerId && session.players.length > 0 && session.players[0].id === currentPlayerId;
+  const difficultyText = {
+    'family-friendly': 'Family Friendly',
+    'getting-personal': 'Getting Personal',
+    'hot-seat-exclusive': 'Hot Seat Exclusive'
+  };
 
   if (session.status === 'lobby') {
     return (
@@ -190,7 +208,10 @@ export default function SessionPage() {
         <Card className="shadow-lg">
           <CardHeader className="text-center">
             <CardTitle className="text-3xl font-headline">Game Lobby</CardTitle>
-            <CardDescription>Session ID: <span className="font-bold text-primary">{sessionId}</span></CardDescription>
+            <CardDescription>
+              Session ID: <span className="font-bold text-primary">{sessionId}</span> <br/>
+              Difficulty: <span className="font-semibold text-accent">{difficultyText[session.difficulty] || 'Not set'}</span>
+            </CardDescription>
             <p className="text-sm text-muted-foreground">Share this ID with your friends to join!</p>
           </CardHeader>
           <CardContent className="space-y-6">

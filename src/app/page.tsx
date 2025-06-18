@@ -6,22 +6,26 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
+import type { QuestionDifficulty } from '@/types';
 import { nanoid } from 'nanoid';
-import { PartyPopper, LogIn } from 'lucide-react';
+import { PartyPopper, LogIn, Settings2 } from 'lucide-react';
 
 export default function HomePage() {
   const [joinSessionId, setJoinSessionId] = useState('');
+  const [selectedDifficulty, setSelectedDifficulty] = useState<QuestionDifficulty>('family-friendly');
   const router = useRouter();
 
   const handleCreateSession = () => {
-    const newSessionId = nanoid(6).toUpperCase(); // Generate a 6-character uppercase ID
-    router.push(`/session/${newSessionId}`);
+    const newSessionId = nanoid(6).toUpperCase();
+    router.push(`/session/${newSessionId}?difficulty=${selectedDifficulty}`);
   };
 
   const handleJoinSession = (e: React.FormEvent) => {
     e.preventDefault();
     if (joinSessionId.trim()) {
-      router.push(`/session/${joinSessionId.trim()}`); // Already uppercased by onChange
+      router.push(`/session/${joinSessionId.trim().toUpperCase()}`);
     }
   };
 
@@ -45,11 +49,31 @@ export default function HomePage() {
               Create New Game
             </CardTitle>
             <CardDescription>
-              Start a new game session and invite your friends.
+              Start a new game session and invite your friends. Choose your question style below.
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <p>Click the button below to generate a unique game ID and start a new session.</p>
+          <CardContent className="space-y-4">
+            <div>
+              <Label htmlFor="difficulty-select" className="text-lg font-medium flex items-center gap-1 mb-2">
+                <Settings2 className="w-5 h-5 text-muted-foreground" />
+                Question Difficulty
+              </Label>
+              <Select value={selectedDifficulty} onValueChange={(value) => setSelectedDifficulty(value as QuestionDifficulty)}>
+                <SelectTrigger id="difficulty-select" className="w-full text-lg py-6">
+                  <SelectValue placeholder="Select difficulty" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="family-friendly" className="text-lg">😊 Family Friendly</SelectItem>
+                  <SelectItem value="getting-personal" className="text-lg">🤔 Getting Personal</SelectItem>
+                  <SelectItem value="hot-seat-exclusive" className="text-lg">🌶️ Hot Seat Exclusive</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {selectedDifficulty === 'family-friendly' && 'Fun and light-hearted questions suitable for everyone.'}
+              {selectedDifficulty === 'getting-personal' && 'A bit more revealing, great for close friends.'}
+              {selectedDifficulty === 'hot-seat-exclusive' && 'Daring and potentially NSFW questions for the bold!'}
+            </p>
           </CardContent>
           <CardFooter>
             <Button

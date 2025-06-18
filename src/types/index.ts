@@ -1,3 +1,4 @@
+
 export interface Player {
   id: string;
   name: string;
@@ -21,6 +22,8 @@ export interface GameQuestionAnswers {
 
 export type GameStatus = 'lobby' | 'playing' | 'results';
 
+export type QuestionDifficulty = 'family-friendly' | 'getting-personal' | 'hot-seat-exclusive';
+
 export interface GameSession {
   id: string;
   players: Player[];
@@ -33,4 +36,5 @@ export interface GameSession {
   currentQuestionIndex: number;
   status: GameStatus;
   hostId?: string; // ID of the player who can start the game (optional for simpler client-side)
+  difficulty: QuestionDifficulty;
 }
