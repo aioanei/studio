@@ -19,10 +19,6 @@ import { Users, Play, Loader2, MessageSquare, Crown, Info, Frown } from 'lucide-
 
 const MIN_PLAYERS = 2; 
 
-interface FirestorePlayerAnswer extends Omit<PlayerAnswer, 'chosenPlayerId'> {
-  chosenPlayerId: string | FieldValue; 
-}
-
 export default function SessionPage() {
   const params = useParams();
   const router = useRouter();
@@ -40,11 +36,13 @@ export default function SessionPage() {
   const playerStorageKey = `hotseat-player-${sessionId}`;
 
   useEffect(() => {
-    const storedPlayerId = localStorage.getItem(playerStorageKey);
-    if (storedPlayerId) {
-      setCurrentPlayerId(storedPlayerId);
+    if (sessionId) { // Check if sessionId is available before trying to get item
+        const storedPlayerId = localStorage.getItem(playerStorageKey);
+        if (storedPlayerId) {
+          setCurrentPlayerId(storedPlayerId);
+        }
     }
-  }, [playerStorageKey]);
+  }, [playerStorageKey, sessionId]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -54,10 +52,12 @@ export default function SessionPage() {
       if (docSnap.exists()) {
         setSession(docSnap.data() as GameSession);
       } else {
+        // Document doesn't exist
         const isCreatingNew = searchParams.get('new') === 'true';
         const difficultyFromQuery = searchParams.get('difficulty') as QuestionDifficulty | null;
         
         if (isCreatingNew && difficultyFromQuery) {
+          // This client is supposed to create the session.
           const newSession: GameSession = {
             id: sessionId,
             players: [],
@@ -69,21 +69,27 @@ export default function SessionPage() {
           };
           setDoc(sessionRef, newSession)
             .then(() => {
-              setSession(newSession);
+              setSession(newSession); // Update local state immediately
               toast({ title: "Session Created!", description: "Waiting for players to join." });
             })
             .catch(error => {
               console.error("Error creating session:", error);
-              toast({ title: "Error", description: "Could not create session. Please try again.", variant: "destructive" });
+              toast({ 
+                title: "Session Creation Failed", 
+                description: `Could not create session ${sessionId}. Ensure Firebase is correctly configured and check console for errors. Error: ${error.message}`, 
+                variant: "destructive",
+                duration: 9000,
+              });
               router.push('/');
             });
         } else {
+          // Not creating (e.g. a joiner, or host with missing params)
           setSession(null); // Session not found
         }
       }
     }, (error) => {
       console.error("Error subscribing to session:", error);
-      toast({ title: "Connection Error", description: "Could not connect to session.", variant: "destructive" });
+      toast({ title: "Connection Error", description: "Could not connect to session. Check Firebase setup and console.", variant: "destructive" });
       setSession(null);
     });
 
@@ -109,6 +115,12 @@ export default function SessionPage() {
     const sessionRef = doc(db, 'sessions', sessionId);
 
     try {
+      // Ensure session document exists before trying to update it with arrayUnion
+      // This is more a safeguard; lobby status should mean doc exists.
+      if (!session) {
+          toast({title: "Error", description: "Session not available to join.", variant: "destructive"});
+          return;
+      }
       await updateDoc(sessionRef, {
         players: arrayUnion(newPlayer)
       });
@@ -116,7 +128,7 @@ export default function SessionPage() {
       toast({ title: "Player Added!", description: `${newPlayer.name} has joined the game.` });
     } catch (error) {
       console.error("Error adding player:", error);
-      toast({ title: "Error", description: "Could not add player to session.", variant: "destructive" });
+      toast({ title: "Error", description: "Could not add player. Ensure session exists and you have permissions.", variant: "destructive" });
     }
   };
 
@@ -128,7 +140,7 @@ export default function SessionPage() {
     setIsLoading(true);
     try {
       const playerNames = session.players.map(p => p.name);
-      const numQuestions = playerNames.length * 2; // Or some other logic
+      const numQuestions = playerNames.length * 2; 
       const aiResult = await generateQuestions({ playerNames, numQuestions, difficulty: session.difficulty });
       
       const questions: Question[] = aiResult.questions.map(qText => ({ id: nanoid(8), text: qText }));
@@ -138,7 +150,7 @@ export default function SessionPage() {
         questions,
         status: 'playing',
         currentQuestionIndex: 0,
-        allAnswers: {}, // Reset answers
+        allAnswers: {}, 
       });
       toast({ title: "Game Started!", description: "Let the fun begin!" });
     } catch (error) {
@@ -157,7 +169,6 @@ export default function SessionPage() {
     const sessionRef = doc(db, 'sessions', sessionId);
     
     try {
-      // Create a new map for allAnswers to ensure correct update path
       const currentAnswersForQuestion = session.allAnswers[currentQuestion.id] || [];
       const updatedAnswersForQuestion = [...currentAnswersForQuestion.filter(a => a.playerId !== currentPlayerId), newAnswer];
       
@@ -182,9 +193,6 @@ export default function SessionPage() {
             allAnswers: newAllAnswers, 
             status: 'results' 
           });
-          // Navigation to results will happen due to status change in onSnapshot listener
-          // or can be explicit here if preferred after successful update.
-          // router.push(`/session/${sessionId}/results`); // Optional: explicit navigation
         }
       } else {
         toast({ title: "Answer Submitted!", description: "Waiting for other players..." });
@@ -206,7 +214,7 @@ export default function SessionPage() {
 
   const isHost = session && currentPlayerId && session.players.length > 0 && session.players[0].id === currentPlayerId;
 
-  if (session === undefined) { // Still loading
+  if (session === undefined) { 
     return (
       <div className="flex flex-col justify-center items-center min-h-[calc(100vh-200px)]">
         <Loader2 className="w-12 h-12 animate-spin text-primary" />
@@ -215,14 +223,14 @@ export default function SessionPage() {
     );
   }
 
-  if (session === null) { // Session not found after attempting to load
+  if (session === null) { 
     return (
       <div className="flex flex-col justify-center items-center min-h-[calc(100vh-200px)] text-center p-4">
         <Frown className="h-16 w-16 text-destructive mb-4" />
         <h1 className="text-3xl font-headline font-bold text-destructive mb-2">Session Not Found</h1>
         <p className="text-lg text-muted-foreground mb-6 max-w-md">
           The game session ID <span className="font-bold text-primary">{sessionId}</span> could not be found.
-          It might have expired, been mistyped, or never existed.
+          It might have expired, been mistyped, or never existed. Please check your Firebase setup if you are the host.
         </p>
         <Button onClick={() => router.push('/')} size="lg">
           Go to Homepage
@@ -357,7 +365,7 @@ export default function SessionPage() {
                       disabled={isSubmitting}
                     >
                       <Avatar className="w-10 h-10 mr-3">
-                         <AvatarImage src={`https://placehold.co/40x40/E3F2FD/9C27B0?text=${player.name.charAt(0).toUpperCase()}`} alt={player.name} data-ai-hint="letter avatar" />
+                         <AvatarImage src={`https://placehold.co/40x40/E3F2FD/9C27B0?text=${player.name.charAt(0).toUpperCase()}`} alt={player.name} data-ai-hint="letter avatar"/>
                          <AvatarFallback>{player.name.charAt(0).toUpperCase()}</AvatarFallback>
                       </Avatar>
                       {player.name}
@@ -374,14 +382,10 @@ export default function SessionPage() {
   }
 
   if (session.status === 'results') {
-     // Firestore onSnapshot will update session state, if status becomes 'results', this will trigger navigation.
-     // Or, handleSubmitAnswer can navigate explicitly after updating Firestore.
-     // For a smoother transition, it's good if the component responsible for changing status also handles navigation.
-     // If another player's action caused the game to move to results, this client will eventually get the update.
-     if (typeof window !== "undefined") { // Ensure router is used client-side
+     if (typeof window !== "undefined") { 
         router.push(`/session/${sessionId}/results`);
      }
-     return ( // Fallback loading indicator while redirecting
+     return ( 
         <div className="flex justify-center items-center h-full">
             <Loader2 className="w-12 h-12 animate-spin text-primary" />
             <p className="ml-4 text-xl">Transitioning to results...</p>
@@ -389,7 +393,6 @@ export default function SessionPage() {
      );
   }
 
-  // Fallback for any other unexpected state
   return (
     <div className="text-center py-10">
       <h1 className="text-2xl font-bold">Loading or Unknown State</h1>

@@ -20,29 +20,25 @@ export default function ResultsPage() {
   const { toast } = useToast();
   const sessionId = params.sessionId as string;
 
-  const [session, setSession] = useState<GameSession | null | undefined>(undefined); // undefined: loading, null: not found
+  const [session, setSession] = useState<GameSession | null | undefined>(undefined); 
 
   useEffect(() => {
     if (!sessionId) {
-      router.push('/'); // Should not happen if routing is correct
+      router.push('/'); 
       return;
     }
     const sessionRef = doc(db, 'sessions', sessionId);
     const unsubscribe = onSnapshot(sessionRef, (docSnap) => {
       if (docSnap.exists()) {
         const sessionData = docSnap.data() as GameSession;
-        if (sessionData.status !== 'results') {
-          // If status is not 'results', redirect back to game page or lobby.
-          // This could happen if URL is manually accessed.
-          // Or, if host restarts game, this page should reflect that.
-          // For simplicity, let's just set the session, calculations will be based on current data.
-          // A more robust solution might redirect or show a different UI if not in 'results' state.
-           // router.push(`/session/${sessionId}`); // Or show specific message
-        }
+        // It's okay if status is not 'results' yet, calculations will be based on current data.
+        // If game restarts, this page might show old results briefly until session updates to lobby.
         setSession(sessionData);
       } else {
-        setSession(null); // Session not found
+        setSession(null); 
         toast({ title: "Session Expired", description: "This game session no longer exists.", variant: "destructive" });
+        // Optional: redirect if session is truly gone and not just in a different state
+        // router.push('/'); 
       }
     }, (error) => {
       console.error("Error fetching results:", error);
@@ -54,15 +50,17 @@ export default function ResultsPage() {
   }, [sessionId, router, toast]);
 
   const calculatedScores = useMemo(() => {
-    if (!session || !session.players) return [];
+    if (!session || !session.players || session.status !== 'results') return []; // Only calculate for results status
     
     const scores: Record<string, number> = {};
     session.players.forEach(p => scores[p.id] = 0);
 
     Object.values(session.allAnswers || {}).forEach(questionAnswers => {
       (questionAnswers || []).forEach(answer => {
-        if (scores[answer.chosenPlayerId as string] !== undefined) {
-          scores[answer.chosenPlayerId as string]++;
+        // Ensure chosenPlayerId is treated as string for key access
+        const chosenId = answer.chosenPlayerId as string;
+        if (scores[chosenId] !== undefined) {
+          scores[chosenId]++;
         }
       });
     });
@@ -75,6 +73,11 @@ export default function ResultsPage() {
 
   const handlePlayAgain = async () => {
     if (!session) return;
+    // Ensure current user is host before allowing reset.
+    // This requires knowing the currentPlayerId, which isn't directly available on results page
+    // without passing it or fetching player details again.
+    // For simplicity, allowing anyone to "Play Again" which resets the lobby.
+    // A more robust solution would verify host status.
     const sessionRef = doc(db, 'sessions', sessionId);
     try {
       await updateDoc(sessionRef, {
@@ -82,8 +85,7 @@ export default function ResultsPage() {
         questions: [],
         allAnswers: {},
         currentQuestionIndex: 0,
-        // Optionally reset scores here or rely on players array being the source of truth for names
-        players: session.players.map(p => ({ ...p, score: 0 })), // Reset scores for display
+        players: session.players.map(p => ({ ...p, score: 0 })), 
       });
       router.push(`/session/${sessionId}`);
     } catch (error) {
@@ -102,7 +104,7 @@ export default function ResultsPage() {
     );
   }
 
-  if (session === null) {
+  if (session === null || !session.players) { // Added !session.players for robustness
     return (
       <div className="flex flex-col justify-center items-center min-h-[calc(100vh-200px)] text-center p-4">
         <Frown className="h-16 w-16 text-destructive mb-4" />
@@ -112,6 +114,26 @@ export default function ResultsPage() {
           The session may have been deleted or there was an error.
         </p>
         <Button onClick={() => router.push('/')} size="lg">
+          Go to Homepage
+        </Button>
+      </div>
+    );
+  }
+  
+  // If session status is not 'results', show a message or redirect.
+  // This handles cases where user navigates directly to results URL before game ends.
+  if (session.status !== 'results') {
+    return (
+      <div className="flex flex-col justify-center items-center min-h-[calc(100vh-200px)] text-center p-4">
+        <Info className="h-16 w-16 text-primary mb-4" />
+        <h1 className="text-3xl font-headline font-bold text-primary mb-2">Game In Progress or Lobby</h1>
+        <p className="text-lg text-muted-foreground mb-6 max-w-md">
+          The game <span className="font-bold text-accent">{sessionId}</span> is not yet finished. Results will appear here once the game ends.
+        </p>
+        <Button onClick={() => router.push(`/session/${sessionId}`)} size="lg" variant="outline">
+          Back to Game
+        </Button>
+         <Button onClick={() => router.push('/')} size="lg" className="mt-2">
           Go to Homepage
         </Button>
       </div>
@@ -152,7 +174,7 @@ export default function ResultsPage() {
                 ))}
               </div>
             ) : (
-              <p className="text-muted-foreground text-center">No scores to display.</p>
+              <p className="text-muted-foreground text-center">No scores to display. This might happen if the game ended prematurely.</p>
             )}
           </section>
 
