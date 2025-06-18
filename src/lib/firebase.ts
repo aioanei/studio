@@ -13,19 +13,29 @@ const firebaseConfig = {
 };
 
 // Log the config to help with debugging
-console.log("Firebase Config being used:", firebaseConfig);
+console.log("Firebase Config being used (from environment variables):", firebaseConfig);
 
 if (!firebaseConfig.projectId) {
-  console.error("Firebase projectId is missing! Please check your .env file and ensure NEXT_PUBLIC_FIREBASE_PROJECT_ID is set correctly.");
-  // Optionally, throw an error to halt execution if critical
-  // throw new Error("Firebase projectId is missing. App cannot connect to Firebase.");
+  console.error(
+    "Firebase projectId is missing or undefined in the loaded firebaseConfig! " +
+    "Please check your .env file and ensure NEXT_PUBLIC_FIREBASE_PROJECT_ID is set correctly. " +
+    "You may also need to restart your development server after updating the .env file."
+  );
+  // Optionally, throw an error to halt execution if critical,
+  // but for now, we'll let it proceed so other logs might appear.
 }
 
 // Initialize Firebase
 let app;
 if (!getApps().length) {
   try {
-    app = initializeApp(firebaseConfig);
+    // Only attempt to initialize if projectId is somewhat valid,
+    // though initializeApp might still fail if other critical parts are missing.
+    if (firebaseConfig.projectId) {
+      app = initializeApp(firebaseConfig);
+    } else {
+      throw new Error("Cannot initialize Firebase: projectId is missing from config.");
+    }
   } catch (e) {
     console.error("Error initializing Firebase app:", e);
     // Prevent further errors by not trying to get Firestore instance if app init failed
@@ -37,7 +47,14 @@ if (!getApps().length) {
 
 let db;
 try {
-  db = getFirestore(app);
+  // Only attempt to get Firestore if app was initialized
+  if (app) {
+    db = getFirestore(app);
+  } else {
+    // This case should ideally be caught by the app initialization error handling.
+    console.error("Firebase app was not initialized, cannot get Firestore instance.");
+    // throw new Error("Firebase app not initialized."); // Or handle gracefully
+  }
 } catch (e) {
   console.error("Error getting Firestore instance:", e);
   // Depending on how you want to handle this, you might re-throw or set db to null
