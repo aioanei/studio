@@ -3,6 +3,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { db } from '@/lib/firebase';
+import { doc, onSnapshot, setDoc, updateDoc, arrayUnion, FieldValue } from 'firebase/firestore';
 import type { GameSession, Player, Question, PlayerAnswer, GameStatus, QuestionDifficulty } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,9 +15,13 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { generateQuestions } from '@/ai/flows/generate-questions';
 import { useToast } from '@/hooks/use-toast';
 import { nanoid } from 'nanoid';
-import { Users, Play, Loader2, MessageSquare, Crown, Info } from 'lucide-react';
+import { Users, Play, Loader2, MessageSquare, Crown, Info, Frown } from 'lucide-react';
 
-const MIN_PLAYERS = 2; // Minimum players to start the game
+const MIN_PLAYERS = 2; 
+
+interface FirestorePlayerAnswer extends Omit<PlayerAnswer, 'chosenPlayerId'> {
+  chosenPlayerId: string | FieldValue; 
+}
 
 export default function SessionPage() {
   const params = useParams();
@@ -25,106 +31,115 @@ export default function SessionPage() {
   
   const sessionId = (params.sessionId as string)?.toUpperCase();
 
-  const [session, setSession] = useState<GameSession | null>(null);
+  const [session, setSession] = useState<GameSession | null | undefined>(undefined); // undefined: loading, null: not found
   const [playerName, setPlayerName] = useState('');
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoading, setIsLoading] = useState(false); // For AI question generation
+  const [isSubmitting, setIsSubmitting] = useState(false); // For answer submission
 
-  const storageKey = `hotseat-session-${sessionId}`;
   const playerStorageKey = `hotseat-player-${sessionId}`;
 
   useEffect(() => {
-    if (!sessionId) return;
-
-    const storedSession = localStorage.getItem(storageKey);
-    const difficultyFromQuery = searchParams.get('difficulty') as QuestionDifficulty | null;
-
-    if (storedSession) {
-      const parsedSession = JSON.parse(storedSession) as GameSession;
-      // If difficulty is in query and session doesn't have it or it's different, update it (host starting new game type)
-      // Or if a player joins and the session already has a difficulty.
-      if (difficultyFromQuery && parsedSession.difficulty !== difficultyFromQuery) {
-         // This might happen if host changes difficulty and reloads, or if URL is manually crafted.
-         // For now, let's assume query param is authoritative if the session is being newly "created" or "joined" by host.
-         // If a non-host joins, the existing session difficulty should persist.
-         // This logic gets simpler with a central DB.
-         const isPlayerAlreadyInSession = parsedSession.players.some(p => p.id === localStorage.getItem(playerStorageKey));
-         if (!isPlayerAlreadyInSession || parsedSession.players.length === 0) {
-            parsedSession.difficulty = difficultyFromQuery;
-         }
-      }
-      setSession(parsedSession);
-    } else {
-      setSession({
-        id: sessionId,
-        players: [],
-        questions: [],
-        allAnswers: {},
-        currentQuestionIndex: 0,
-        status: 'lobby',
-        difficulty: difficultyFromQuery || 'family-friendly',
-      });
-    }
-
     const storedPlayerId = localStorage.getItem(playerStorageKey);
     if (storedPlayerId) {
       setCurrentPlayerId(storedPlayerId);
     }
-  }, [sessionId, storageKey, playerStorageKey, searchParams]);
+  }, [playerStorageKey]);
 
   useEffect(() => {
-    if (session) {
-      localStorage.setItem(storageKey, JSON.stringify(session));
-    }
-  }, [session, storageKey]);
+    if (!sessionId) return;
 
-  const updateSession = useCallback((newSessionData: Partial<GameSession> | ((prev: GameSession) => GameSession)) => {
-    setSession(prev => {
-      if (!prev) return null;
-      const updated = typeof newSessionData === 'function' ? newSessionData(prev) : { ...prev, ...newSessionData };
-      return updated;
+    const sessionRef = doc(db, 'sessions', sessionId);
+    const unsubscribe = onSnapshot(sessionRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setSession(docSnap.data() as GameSession);
+      } else {
+        const isCreatingNew = searchParams.get('new') === 'true';
+        const difficultyFromQuery = searchParams.get('difficulty') as QuestionDifficulty | null;
+        
+        if (isCreatingNew && difficultyFromQuery) {
+          const newSession: GameSession = {
+            id: sessionId,
+            players: [],
+            questions: [],
+            allAnswers: {},
+            currentQuestionIndex: 0,
+            status: 'lobby',
+            difficulty: difficultyFromQuery,
+          };
+          setDoc(sessionRef, newSession)
+            .then(() => {
+              setSession(newSession);
+              toast({ title: "Session Created!", description: "Waiting for players to join." });
+            })
+            .catch(error => {
+              console.error("Error creating session:", error);
+              toast({ title: "Error", description: "Could not create session. Please try again.", variant: "destructive" });
+              router.push('/');
+            });
+        } else {
+          setSession(null); // Session not found
+        }
+      }
+    }, (error) => {
+      console.error("Error subscribing to session:", error);
+      toast({ title: "Connection Error", description: "Could not connect to session.", variant: "destructive" });
+      setSession(null);
     });
-  }, []);
 
-  const handleAddPlayer = () => {
-    if (!playerName.trim() || !session) return;
+    return () => unsubscribe();
+  }, [sessionId, router, searchParams, toast]);
+
+
+  const handleAddPlayer = async () => {
+    if (!playerName.trim() || !session || session.status !== 'lobby') return;
     if (session.players.find(p => p.name.toLowerCase() === playerName.trim().toLowerCase())) {
       toast({ title: "Name already taken", description: "Please choose a different name.", variant: "destructive" });
       return;
     }
 
-    const newPlayer: Player = { id: nanoid(8), name: playerName.trim(), score: 0 };
-    updateSession(prev => ({ ...prev, players: [...prev.players, newPlayer] }));
-    
-    if (!currentPlayerId) {
-      setCurrentPlayerId(newPlayer.id);
-      localStorage.setItem(playerStorageKey, newPlayer.id);
+    let playerIdToSet = currentPlayerId;
+    if (!playerIdToSet) {
+      playerIdToSet = nanoid(8);
+      localStorage.setItem(playerStorageKey, playerIdToSet);
+      setCurrentPlayerId(playerIdToSet);
     }
-    setPlayerName('');
-    toast({ title: "Player Added!", description: `${newPlayer.name} has joined the game.` });
+    
+    const newPlayer: Player = { id: playerIdToSet, name: playerName.trim(), score: 0 };
+    const sessionRef = doc(db, 'sessions', sessionId);
+
+    try {
+      await updateDoc(sessionRef, {
+        players: arrayUnion(newPlayer)
+      });
+      setPlayerName('');
+      toast({ title: "Player Added!", description: `${newPlayer.name} has joined the game.` });
+    } catch (error) {
+      console.error("Error adding player:", error);
+      toast({ title: "Error", description: "Could not add player to session.", variant: "destructive" });
+    }
   };
 
   const handleStartGame = async () => {
-    if (!session || session.players.length < MIN_PLAYERS) {
-      toast({ title: "Not enough players", description: `You need at least ${MIN_PLAYERS} players to start.`, variant: "destructive" });
+    if (!session || session.players.length < MIN_PLAYERS || !isHost) {
+      toast({ title: "Cannot start game", description: `You need at least ${MIN_PLAYERS} players and be the host.`, variant: "destructive" });
       return;
     }
     setIsLoading(true);
     try {
       const playerNames = session.players.map(p => p.name);
-      const numQuestions = playerNames.length * 2;
+      const numQuestions = playerNames.length * 2; // Or some other logic
       const aiResult = await generateQuestions({ playerNames, numQuestions, difficulty: session.difficulty });
       
       const questions: Question[] = aiResult.questions.map(qText => ({ id: nanoid(8), text: qText }));
       
-      updateSession(prev => ({
-        ...prev,
+      const sessionRef = doc(db, 'sessions', sessionId);
+      await updateDoc(sessionRef, {
         questions,
         status: 'playing',
         currentQuestionIndex: 0,
-        allAnswers: {},
-      }));
+        allAnswers: {}, // Reset answers
+      });
       toast({ title: "Game Started!", description: "Let the fun begin!" });
     } catch (error) {
       console.error("Failed to generate questions:", error);
@@ -134,68 +149,88 @@ export default function SessionPage() {
     }
   };
 
-  const handleSubmitAnswer = (chosenPlayerId: string) => {
-    if (!session || !currentPlayerId || session.status !== 'playing') return;
+  const handleSubmitAnswer = async (chosenPlayerId: string) => {
+    if (!session || !currentPlayerId || session.status !== 'playing' || !currentQuestion) return;
     setIsSubmitting(true);
 
-    const currentQuestion = session.questions[session.currentQuestionIndex];
-    if (!currentQuestion) {
-      setIsSubmitting(false);
-      return;
-    }
-
     const newAnswer: PlayerAnswer = { playerId: currentPlayerId, chosenPlayerId };
-
-    updateSession(prev => {
-      if (!prev) return prev;
-      const existingAnswers = prev.allAnswers[currentQuestion.id] || [];
-      const updatedAnswersForQuestion = [...existingAnswers.filter(a => a.playerId !== currentPlayerId), newAnswer];
+    const sessionRef = doc(db, 'sessions', sessionId);
+    
+    try {
+      // Create a new map for allAnswers to ensure correct update path
+      const currentAnswersForQuestion = session.allAnswers[currentQuestion.id] || [];
+      const updatedAnswersForQuestion = [...currentAnswersForQuestion.filter(a => a.playerId !== currentPlayerId), newAnswer];
       
-      const allPlayersAnswered = prev.players.every(p => 
+      const newAllAnswers = {
+        ...session.allAnswers,
+        [currentQuestion.id]: updatedAnswersForQuestion
+      };
+
+      const allPlayersAnswered = session.players.every(p => 
         updatedAnswersForQuestion.some(ans => ans.playerId === p.id)
       );
 
       if (allPlayersAnswered) {
-        if (prev.currentQuestionIndex < prev.questions.length - 1) {
-           toast({ title: "Round Complete!", description: "Moving to the next question..." });
-          return {
-            ...prev,
-            allAnswers: { ...prev.allAnswers, [currentQuestion.id]: updatedAnswersForQuestion },
-            currentQuestionIndex: prev.currentQuestionIndex + 1,
-          };
+        if (session.currentQuestionIndex < session.questions.length - 1) {
+          toast({ title: "Round Complete!", description: "Moving to the next question..." });
+          await updateDoc(sessionRef, {
+            allAnswers: newAllAnswers,
+            currentQuestionIndex: session.currentQuestionIndex + 1,
+          });
         } else {
-          router.push(`/session/${sessionId}/results`);
-          return { 
-            ...prev,
-            allAnswers: { ...prev.allAnswers, [currentQuestion.id]: updatedAnswersForQuestion }, 
+          await updateDoc(sessionRef, { 
+            allAnswers: newAllAnswers, 
             status: 'results' 
-          }; 
+          });
+          // Navigation to results will happen due to status change in onSnapshot listener
+          // or can be explicit here if preferred after successful update.
+          // router.push(`/session/${sessionId}/results`); // Optional: explicit navigation
         }
       } else {
         toast({ title: "Answer Submitted!", description: "Waiting for other players..." });
-        return {
-          ...prev,
-          allAnswers: { ...prev.allAnswers, [currentQuestion.id]: updatedAnswersForQuestion },
-        };
+        await updateDoc(sessionRef, {
+          allAnswers: newAllAnswers,
+        });
       }
-    });
-    setIsSubmitting(false);
+    } catch (error) {
+        console.error("Error submitting answer:", error);
+        toast({ title: "Error", description: "Could not submit answer.", variant: "destructive" });
+    } finally {
+        setIsSubmitting(false);
+    }
   };
   
   const currentQuestion = session?.status === 'playing' ? session.questions[session.currentQuestionIndex] : null;
   const currentPlayerHasAnswered = session && currentQuestion && currentPlayerId &&
     (session.allAnswers[currentQuestion.id] || []).some(ans => ans.playerId === currentPlayerId);
 
-  if (!session) {
+  const isHost = session && currentPlayerId && session.players.length > 0 && session.players[0].id === currentPlayerId;
+
+  if (session === undefined) { // Still loading
     return (
-      <div className="flex justify-center items-center h-full">
+      <div className="flex flex-col justify-center items-center min-h-[calc(100vh-200px)]">
         <Loader2 className="w-12 h-12 animate-spin text-primary" />
-        <p className="ml-4 text-xl">Loading session...</p>
+        <p className="ml-4 text-xl mt-4">Loading session...</p>
       </div>
     );
   }
 
-  const isHost = currentPlayerId && session.players.length > 0 && session.players[0].id === currentPlayerId;
+  if (session === null) { // Session not found after attempting to load
+    return (
+      <div className="flex flex-col justify-center items-center min-h-[calc(100vh-200px)] text-center p-4">
+        <Frown className="h-16 w-16 text-destructive mb-4" />
+        <h1 className="text-3xl font-headline font-bold text-destructive mb-2">Session Not Found</h1>
+        <p className="text-lg text-muted-foreground mb-6 max-w-md">
+          The game session ID <span className="font-bold text-primary">{sessionId}</span> could not be found.
+          It might have expired, been mistyped, or never existed.
+        </p>
+        <Button onClick={() => router.push('/')} size="lg">
+          Go to Homepage
+        </Button>
+      </div>
+    );
+  }
+  
   const difficultyText = {
     'family-friendly': 'Family Friendly',
     'getting-personal': 'Getting Personal',
@@ -215,15 +250,7 @@ export default function SessionPage() {
             <p className="text-sm text-muted-foreground">Share this ID with your friends to join!</p>
           </CardHeader>
           <CardContent className="space-y-6">
-            <Alert>
-              <Info className="h-4 w-4" />
-              <AlertTitle>Local Session Note</AlertTitle>
-              <AlertDescription>
-                Currently, game sessions are stored locally in your browser using localStorage. This means data isn't shared with friends on other devices. For true multi-device play, a real-time database (like Firebase) is needed.
-              </AlertDescription>
-            </Alert>
-
-            {!currentPlayerId || !session.players.find(p => p.id === currentPlayerId) ? (
+             {!currentPlayerId || !session.players.find(p => p.id === currentPlayerId) ? (
               <div className="space-y-2">
                 <Input
                   type="text"
@@ -319,7 +346,7 @@ export default function SessionPage() {
                 <h3 className="text-xl font-semibold mb-4 text-center text-accent">Choose a Player:</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {session.players
-                    .filter(p => p.id !== currentPlayerId) // Can't choose self
+                    .filter(p => p.id !== currentPlayerId) 
                     .map(player => (
                     <Button
                       key={player.id}
@@ -347,19 +374,26 @@ export default function SessionPage() {
   }
 
   if (session.status === 'results') {
-     router.push(`/session/${sessionId}/results`); 
-     return (
+     // Firestore onSnapshot will update session state, if status becomes 'results', this will trigger navigation.
+     // Or, handleSubmitAnswer can navigate explicitly after updating Firestore.
+     // For a smoother transition, it's good if the component responsible for changing status also handles navigation.
+     // If another player's action caused the game to move to results, this client will eventually get the update.
+     if (typeof window !== "undefined") { // Ensure router is used client-side
+        router.push(`/session/${sessionId}/results`);
+     }
+     return ( // Fallback loading indicator while redirecting
         <div className="flex justify-center items-center h-full">
             <Loader2 className="w-12 h-12 animate-spin text-primary" />
-            <p className="ml-4 text-xl">Loading results...</p>
+            <p className="ml-4 text-xl">Transitioning to results...</p>
         </div>
      );
   }
 
+  // Fallback for any other unexpected state
   return (
     <div className="text-center py-10">
-      <h1 className="text-2xl font-bold">Something went wrong.</h1>
-      <p className="text-muted-foreground">Could not determine game state.</p>
+      <h1 className="text-2xl font-bold">Loading or Unknown State</h1>
+      <p className="text-muted-foreground">Please wait or try refreshing.</p>
       <Button onClick={() => router.push('/')} className="mt-4">Go Home</Button>
     </div>
   );

@@ -19,7 +19,8 @@ export default function HomePage() {
 
   const handleCreateSession = () => {
     const newSessionId = nanoid(6).toUpperCase();
-    router.push(`/session/${newSessionId}?difficulty=${selectedDifficulty}`);
+    // Pass difficulty as a query parameter
+    router.push(`/session/${newSessionId}?difficulty=${selectedDifficulty}&new=true`);
   };
 
   const handleJoinSession = (e: React.FormEvent) => {
