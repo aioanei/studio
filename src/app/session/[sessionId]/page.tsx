@@ -71,7 +71,6 @@ function RoundResult({ session, currentQuestion, isHost, onNextRound }: { sessio
                                     <p className="text-3xl font-bold text-primary">{winner.name}</p>
                                 </div>
                             ))}
-                            <p className="text-lg text-muted-foreground mt-2">with {maxVotes} vote{maxVotes > 1 ? 's' : ''}!</p>
                         </div>
                     ) : (
                         <p className="text-xl text-muted-foreground">No one got any votes!</p>
