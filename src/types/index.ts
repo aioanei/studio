@@ -1,4 +1,5 @@
 
+
 export interface Player {
   id: string;
   name: string;
@@ -20,7 +21,7 @@ export interface GameQuestionAnswers {
   answers: PlayerAnswer[]; // Array of answers from all players for this question
 }
 
-export type GameStatus = 'lobby' | 'playing' | 'results';
+export type GameStatus = 'lobby' | 'playing' | 'round_results' | 'results';
 
 export type QuestionDifficulty = 'family-friendly' | 'getting-personal' | 'hot-seat-exclusive';
 

@@ -11,10 +11,9 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
 import { nanoid } from 'nanoid';
-import { Users, Play, Loader2, MessageSquare, Crown, Info, Frown } from 'lucide-react';
+import { Users, Play, Loader2, MessageSquare, Crown, Frown, Sparkles, ChevronsRight } from 'lucide-react';
 import { PREDEFINED_QUESTIONS } from '@/lib/questions';
 
 const MIN_PLAYERS = 2; 
@@ -23,6 +22,76 @@ const MIN_PLAYERS = 2;
 function shuffleAndPick<T>(array: T[], count: number): T[] {
   const shuffled = array.sort(() => 0.5 - Math.random());
   return shuffled.slice(0, count);
+}
+
+function RoundResult({ session, currentQuestion, isHost, onNextRound }: { session: GameSession, currentQuestion: Question, isHost: boolean, onNextRound: () => void }) {
+  const [show, setShow] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setShow(true), 100); // Stagger for animation
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (!currentQuestion) return null;
+
+  const answersForQuestion = session.allAnswers[currentQuestion.id] || [];
+  const votes: Record<string, number> = {};
+  
+  answersForQuestion.forEach(ans => {
+    votes[ans.chosenPlayerId] = (votes[ans.chosenPlayerId] || 0) + 1;
+  });
+
+  const maxVotes = Math.max(0, ...Object.values(votes));
+  const winners = session.players.filter(p => votes[p.id] === maxVotes && maxVotes > 0);
+
+  return (
+    <div className={`max-w-3xl mx-auto py-8 transition-opacity duration-700 ease-in-out ${show ? 'opacity-100' : 'opacity-0'}`}>
+        <Card className="shadow-2xl border-2 border-primary/50 overflow-hidden">
+            <CardHeader className="text-center bg-secondary/30">
+                <CardTitle className="text-3xl font-headline text-primary">
+                    Round {session.currentQuestionIndex + 1} Results
+                </CardTitle>
+                <CardDescription className="text-lg mt-2">
+                    For the question: <span className="font-semibold text-foreground">"{currentQuestion.text}"</span>
+                </CardDescription>
+            </CardHeader>
+            <CardContent className="py-8 text-center">
+                <div className="relative">
+                    <Sparkles className="absolute -top-4 left-1/2 -translate-x-1/2 w-12 h-12 text-yellow-400 animate-pulse" />
+                    <h3 className="text-2xl font-semibold text-accent mb-4">The Hot Seat goes to...</h3>
+                    
+                    {winners.length > 0 ? (
+                        <div className="flex flex-col items-center gap-4">
+                            {winners.map(winner => (
+                                <div key={winner.id} className="flex flex-col items-center animate-in fade-in zoom-in-105 duration-1000">
+                                    <Avatar className="w-24 h-24 mb-3 border-4 border-yellow-400">
+                                        <AvatarImage src={`https://placehold.co/96x96/FFD700/000000?text=${winner.name.charAt(0).toUpperCase()}`} alt={winner.name} data-ai-hint="letter avatar" />
+                                        <AvatarFallback>{winner.name.charAt(0).toUpperCase()}</AvatarFallback>
+                                    </Avatar>
+                                    <p className="text-3xl font-bold text-primary">{winner.name}</p>
+                                </div>
+                            ))}
+                            <p className="text-lg text-muted-foreground mt-2">with {maxVotes} vote{maxVotes > 1 ? 's' : ''}!</p>
+                        </div>
+                    ) : (
+                        <p className="text-xl text-muted-foreground">No one got any votes!</p>
+                    )}
+                </div>
+            </CardContent>
+            {isHost && (
+                <CardContent className="text-center border-t pt-6">
+                    <Button size="lg" onClick={onNextRound} className="animate-bounce">
+                        {session.currentQuestionIndex < session.questions.length - 1 ? 'Next Question' : 'View Final Results'}
+                        <ChevronsRight className="w-5 h-5 ml-2" />
+                    </Button>
+                </CardContent>
+            )}
+            {!isHost && (
+                <p className="text-center text-muted-foreground pb-6">Waiting for the host to continue...</p>
+            )}
+        </Card>
+    </div>
+  );
 }
 
 
@@ -43,7 +112,7 @@ export default function SessionPage() {
   const playerStorageKey = `hotseat-player-${sessionId}`;
 
   useEffect(() => {
-    if (sessionId) { // Check if sessionId is available before trying to get item
+    if (sessionId) { 
         const storedPlayerId = localStorage.getItem(playerStorageKey);
         if (storedPlayerId) {
           setCurrentPlayerId(storedPlayerId);
@@ -59,12 +128,10 @@ export default function SessionPage() {
       if (docSnap.exists()) {
         setSession(docSnap.data() as GameSession);
       } else {
-        // Document doesn't exist
         const isCreatingNew = searchParams.get('new') === 'true';
         const difficultyFromQuery = searchParams.get('difficulty') as QuestionDifficulty | null;
         
         if (isCreatingNew && difficultyFromQuery) {
-          // This client is supposed to create the session.
           const newSession: GameSession = {
             id: sessionId,
             players: [],
@@ -76,22 +143,21 @@ export default function SessionPage() {
           };
           setDoc(sessionRef, newSession)
             .then(() => {
-              setSession(newSession); // Update local state immediately
+              setSession(newSession);
               toast({ title: "Session Created!", description: "Waiting for players to join." });
             })
             .catch(error => {
               console.error("Error creating session:", error);
               toast({ 
                 title: "Session Creation Failed", 
-                description: `Could not create session ${sessionId}. Ensure Firebase is correctly configured and check console for errors. Error: ${error.message}`, 
+                description: `Could not create session ${sessionId}. Check Firebase setup. Error: ${error.message}`, 
                 variant: "destructive",
                 duration: 9000,
               });
               router.push('/');
             });
         } else {
-          // Not creating (e.g. a joiner, or host with missing params)
-          setSession(null); // Session not found
+          setSession(null);
         }
       }
     }, (error) => {
@@ -122,8 +188,6 @@ export default function SessionPage() {
     const sessionRef = doc(db, 'sessions', sessionId);
 
     try {
-      // Ensure session document exists before trying to update it with arrayUnion
-      // This is more a safeguard; lobby status should mean doc exists.
       if (!session) {
           toast({title: "Error", description: "Session not available to join.", variant: "destructive"});
           return;
@@ -173,6 +237,20 @@ export default function SessionPage() {
       setIsLoading(false);
     }
   };
+  
+  const handleNextRound = async () => {
+      if (!session || !isHost) return;
+      
+      const sessionRef = doc(db, 'sessions', sessionId);
+      if (session.currentQuestionIndex < session.questions.length - 1) {
+          await updateDoc(sessionRef, {
+              status: 'playing',
+              currentQuestionIndex: session.currentQuestionIndex + 1
+          });
+      } else {
+          await updateDoc(sessionRef, { status: 'results' });
+      }
+  };
 
   const handleSubmitAnswer = async (chosenPlayerId: string) => {
     if (!session || !currentPlayerId || session.status !== 'playing' || !currentQuestion) return;
@@ -195,18 +273,10 @@ export default function SessionPage() {
       );
 
       if (allPlayersAnswered) {
-        if (session.currentQuestionIndex < session.questions.length - 1) {
-          toast({ title: "Round Complete!", description: "Moving to the next question..." });
           await updateDoc(sessionRef, {
             allAnswers: newAllAnswers,
-            currentQuestionIndex: session.currentQuestionIndex + 1,
+            status: 'round_results',
           });
-        } else {
-          await updateDoc(sessionRef, { 
-            allAnswers: newAllAnswers, 
-            status: 'results' 
-          });
-        }
       } else {
         toast({ title: "Answer Submitted!", description: "Waiting for other players..." });
         await updateDoc(sessionRef, {
@@ -221,7 +291,7 @@ export default function SessionPage() {
     }
   };
   
-  const currentQuestion = session?.status === 'playing' ? session.questions[session.currentQuestionIndex] : null;
+  const currentQuestion = (session?.status === 'playing' || session?.status === 'round_results') ? session.questions[session.currentQuestionIndex] : null;
   const currentPlayerHasAnswered = session && currentQuestion && currentPlayerId &&
     (session.allAnswers[currentQuestion.id] || []).some(ans => ans.playerId === currentPlayerId);
 
@@ -336,6 +406,17 @@ export default function SessionPage() {
       </div>
     );
   }
+  
+  if (session.status === 'round_results' && currentQuestion) {
+      return (
+        <RoundResult 
+            session={session} 
+            currentQuestion={currentQuestion}
+            isHost={!!isHost}
+            onNextRound={handleNextRound}
+        />
+      );
+  }
 
   if (session.status === 'playing' && currentQuestion) {
     return (
@@ -359,7 +440,7 @@ export default function SessionPage() {
             
             {currentPlayerHasAnswered ? (
               <div className="text-center p-4 bg-green-100 text-green-700 rounded-md">
-                <p className="font-semibold">Your answer is submitted! Waiting for others or next question.</p>
+                <p className="font-semibold">Your answer is submitted! Waiting for others.</p>
                  {isSubmitting && <Loader2 className="w-6 h-6 animate-spin mx-auto mt-2" />}
               </div>
             ) : (
@@ -367,7 +448,6 @@ export default function SessionPage() {
                 <h3 className="text-xl font-semibold mb-4 text-center text-accent">Choose a Player:</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {session.players
-                    .filter(p => p.id !== currentPlayerId) 
                     .map(player => (
                     <Button
                       key={player.id}
@@ -382,6 +462,7 @@ export default function SessionPage() {
                          <AvatarFallback>{player.name.charAt(0).toUpperCase()}</AvatarFallback>
                       </Avatar>
                       {player.name}
+                      {player.id === currentPlayerId && <span className="text-xs text-muted-foreground ml-2">(Vote for yourself)</span>}
                       {isSubmitting && <Loader2 className="w-5 h-5 animate-spin ml-auto" />}
                     </Button>
                   ))}
