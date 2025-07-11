@@ -5,13 +5,116 @@ import { useState, useEffect, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
-import type { GameSession, Player } from '@/types';
+import type { GameSession, Player, QuestionCategory } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Award, Home, RefreshCcw, Loader2, Frown, Info, ThumbsUp } from 'lucide-react';
+import { Award, Home, RefreshCcw, Loader2, Frown, Info, Medal, Trophy, Bomb, Heart, Brain, Gift } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { motion, AnimatePresence } from 'framer-motion';
+
+// A new component for displaying the awards
+function GameAwards({ session, calculatedScores }: { session: GameSession, calculatedScores: Player[] }) {
+    const awards = useMemo(() => {
+        const categoryVotes: Record<QuestionCategory, Record<string, number>> = {
+            'Life': {},
+            'Wacky': {},
+            'Love': {},
+            'Daring': {},
+        };
+
+        session.questions.forEach(q => {
+            const answers = session.allAnswers[q.id] || [];
+            answers.forEach(ans => {
+                if (!categoryVotes[q.category]) categoryVotes[q.category] = {};
+                categoryVotes[q.category][ans.chosenPlayerId] = (categoryVotes[q.category][ans.chosenPlayerId] || 0) + 1;
+            });
+        });
+
+        const findWinner = (votes: Record<string, number>): Player | null => {
+            let winnerId: string | null = null;
+            let maxVotes = 0;
+            for (const playerId in votes) {
+                if (votes[playerId] > maxVotes) {
+                    maxVotes = votes[playerId];
+                    winnerId = playerId;
+                }
+            }
+            return session.players.find(p => p.id === winnerId) || null;
+        };
+
+        const awardsData = [
+            { title: 'Life of the Party', category: 'Life' as QuestionCategory, Icon: Gift },
+            { title: 'Most Wacky', category: 'Wacky' as QuestionCategory, Icon: Bomb },
+            { title: 'Biggest Flirt', category: 'Love' as QuestionCategory, Icon: Heart },
+            { title: 'Most Daring', category: 'Daring' as QuestionCategory, Icon: Trophy },
+        ].map(award => ({
+            ...award,
+            winner: findWinner(categoryVotes[award.category]),
+        })).filter(award => award.winner);
+
+        // Runner up award
+        if (calculatedScores.length > 1) {
+            awardsData.push({
+                title: 'Just Missed It!',
+                winner: calculatedScores[1],
+                Icon: Medal,
+            });
+        }
+        
+        return awardsData;
+    }, [session, calculatedScores]);
+
+    const containerVariants = {
+        hidden: {},
+        visible: {
+            transition: {
+                staggerChildren: 0.8,
+            },
+        },
+    };
+
+    const itemVariants = {
+        hidden: { opacity: 0, y: 20 },
+        visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: "easeOut" } },
+    };
+
+    return (
+        <section>
+            <h2 className="text-3xl font-semibold mb-6 text-center text-accent flex items-center justify-center gap-2">
+                <Award className="w-8 h-8" /> Special Awards
+            </h2>
+             <motion.div 
+                className="grid grid-cols-1 md:grid-cols-2 gap-4"
+                variants={containerVariants}
+                initial="hidden"
+                animate="visible"
+            >
+                {awards.map((award, index) => (
+                    <motion.div key={index} variants={itemVariants}>
+                        <Card className="bg-secondary/30 h-full">
+                            <CardContent className="p-6 text-center flex flex-col items-center justify-center">
+                                <award.Icon className="w-12 h-12 text-accent mb-3" />
+                                <p className="text-xl font-bold text-accent mb-2">{award.title}</p>
+                                {award.winner ? (
+                                    <div className="flex items-center gap-2">
+                                        <Avatar className="w-8 h-8">
+                                            <AvatarImage src={`https://placehold.co/40x40/E3F2FD/4285F4?text=${award.winner.name.charAt(0).toUpperCase()}`} alt={award.winner.name} data-ai-hint="letter avatar" />
+                                            <AvatarFallback>{award.winner.name.charAt(0).toUpperCase()}</AvatarFallback>
+                                        </Avatar>
+                                        <p className="text-2xl font-bold text-primary">{award.winner.name}</p>
+                                    </div>
+                                ) : (
+                                    <p className="text-muted-foreground">No winner</p>
+                                )}
+                            </CardContent>
+                        </Card>
+                    </motion.div>
+                ))}
+            </motion.div>
+        </section>
+    );
+}
 
 export default function ResultsPage() {
   const params = useParams();
@@ -64,27 +167,6 @@ export default function ResultsPage() {
       .sort((a, b) => b.score - a.score);
   }, [session]);
   
-  const roundWinners = useMemo(() => {
-    if (!session || !session.questions || session.status !== 'results') return [];
-
-    return session.questions.map(question => {
-        const answers = session.allAnswers[question.id] || [];
-        if (answers.length === 0) {
-            return { question, winners: [] };
-        }
-
-        const votes: Record<string, number> = {};
-        answers.forEach(ans => {
-            votes[ans.chosenPlayerId] = (votes[ans.chosenPlayerId] || 0) + 1;
-        });
-
-        const maxVotes = Math.max(...Object.values(votes));
-        const winnerIds = Object.keys(votes).filter(id => votes[id] === maxVotes);
-        const winners = session.players.filter(p => winnerIds.includes(p.id));
-
-        return { question, winners };
-    });
-  }, [session]);
 
   const handlePlayAgain = async () => {
     if (!session) return;
@@ -154,22 +236,25 @@ export default function ResultsPage() {
           
           <section>
             <h2 className="text-3xl font-semibold mb-6 text-center text-accent flex items-center justify-center gap-2">
-              <Award className="w-8 h-8" /> Final Scores
+              <Trophy className="w-8 h-8" /> Final Scores
             </h2>
             {calculatedScores.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="space-y-4">
                 {calculatedScores.map((player, index) => (
                   <Card key={player.id} className={`shadow-md ${index === 0 ? 'border-2 border-yellow-400 bg-yellow-50' : 'bg-background'}`}>
-                    <CardHeader className="flex flex-row items-center justify-between pb-2">
-                       <CardTitle className="text-xl font-medium">{player.name}</CardTitle>
-                       <Avatar className="w-10 h-10">
-                          <AvatarImage src={`https://placehold.co/40x40/${index === 0 ? 'FFD700/000000' : 'E3F2FD/4285F4'}?text=${player.name.charAt(0).toUpperCase()}`} alt={player.name} data-ai-hint="letter avatar"/>
-                          <AvatarFallback>{player.name.charAt(0).toUpperCase()}</AvatarFallback>
-                      </Avatar>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-3xl font-bold text-primary">{player.score} <span className="text-sm font-normal text-muted-foreground">times in the hot seat</span></div>
-                      {index === 0 && <p className="text-sm text-yellow-600 font-semibold mt-1">👑 Hottest Seat!</p>}
+                    <CardContent className="p-4 flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        <span className={`text-2xl font-bold w-8 text-center ${index === 0 ? 'text-yellow-500' : 'text-muted-foreground'}`}>{index + 1}</span>
+                        <Avatar className="w-12 h-12">
+                            <AvatarImage src={`https://placehold.co/48x48/${index === 0 ? 'FFD700/000000' : 'E3F2FD/4285F4'}?text=${player.name.charAt(0).toUpperCase()}`} alt={player.name} data-ai-hint="letter avatar"/>
+                            <AvatarFallback>{player.name.charAt(0).toUpperCase()}</AvatarFallback>
+                        </Avatar>
+                        <p className="text-xl font-medium">{player.name}</p>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-2xl font-bold text-primary">{player.score}</div>
+                        <div className="text-sm text-muted-foreground">votes</div>
+                      </div>
                     </CardContent>
                   </Card>
                 ))}
@@ -179,37 +264,8 @@ export default function ResultsPage() {
             )}
           </section>
 
-          <section>
-            <h2 className="text-3xl font-semibold mb-6 text-center text-accent">Round Summary</h2>
-            {roundWinners.length > 0 ? (
-              <ScrollArea className="h-[400px] rounded-md border p-4 bg-secondary/30">
-                <div className="space-y-4">
-                  {roundWinners.map(({ question, winners }, qIndex) => (
-                    <Card key={question.id} className="bg-background/80">
-                        <CardHeader className="pb-3">
-                            <CardTitle className="text-lg">Q{qIndex + 1}: <span className="font-normal">{question.text}</span></CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="flex items-center gap-3">
-                                <ThumbsUp className="w-6 h-6 text-primary" />
-                                <div>
-                                    <p className="text-sm text-muted-foreground">Most Likely To Be...</p>
-                                    {winners.length > 0 ? (
-                                        <p className="font-bold text-lg text-primary">{winners.map(w => w.name).join(', ')}</p>
-                                    ) : (
-                                        <p className="text-muted-foreground italic">No votes were cast.</p>
-                                    )}
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              </ScrollArea>
-            ) : (
-              <p className="text-muted-foreground text-center">No questions were played in this session.</p>
-            )}
-          </section>
+          <GameAwards session={session} calculatedScores={calculatedScores} />
+
         </CardContent>
         <CardFooter className="flex flex-col sm:flex-row justify-center gap-4 pt-8">
           <Button onClick={handlePlayAgain} variant="outline" size="lg" className="text-accent border-accent hover:bg-accent/10">

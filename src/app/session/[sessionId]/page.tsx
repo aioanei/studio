@@ -259,7 +259,7 @@ export default function SessionPage() {
         toast({ title: "Not Enough Questions", description: `Only ${selectedQuestions.length} questions available for this difficulty, but ${numQuestions} were requested.`, variant: "destructive" });
       }
 
-      const questions: Question[] = selectedQuestions.map(qText => ({ id: nanoid(8), text: qText }));
+      const questions: Question[] = selectedQuestions.map(qData => ({ id: nanoid(8), ...qData }));
       
       const sessionRef = doc(db, 'sessions', sessionId);
       await updateDoc(sessionRef, {

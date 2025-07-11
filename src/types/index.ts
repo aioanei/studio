@@ -1,5 +1,7 @@
 
 
+export type QuestionCategory = 'Life' | 'Wacky' | 'Love' | 'Daring';
+
 export interface Player {
   id: string;
   name: string;
@@ -9,6 +11,7 @@ export interface Player {
 export interface Question {
   id:string;
   text: string;
+  category: QuestionCategory;
 }
 
 export interface PlayerAnswer {
