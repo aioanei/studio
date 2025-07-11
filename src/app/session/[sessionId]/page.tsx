@@ -11,12 +11,14 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/hooks/use-toast';
 import { nanoid } from 'nanoid';
-import { Users, Play, Loader2, MessageSquare, Crown, Frown, Sparkles, ChevronsRight, Info } from 'lucide-react';
+import { Users, Play, Loader2, MessageSquare, Crown, Frown, Sparkles, ChevronsRight, Info, Timer } from 'lucide-react';
 import { PREDEFINED_QUESTIONS } from '@/lib/questions';
 
 const MIN_PLAYERS = 2; 
+const ROUND_TIMER_SECONDS = 15;
 
 // Helper function to shuffle an array and pick a certain number of items
 function shuffleAndPick<T>(array: T[], count: number): T[] {
@@ -107,8 +109,39 @@ export default function SessionPage() {
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false); // For starting game
   const [isSubmitting, setIsSubmitting] = useState(false); // For answer submission
+  const [timeLeft, setTimeLeft] = useState(ROUND_TIMER_SECONDS);
 
   const playerStorageKey = `hotseat-player-${sessionId}`;
+  
+  const isHost = session && currentPlayerId && session.players.length > 0 && session.players[0].id === currentPlayerId;
+
+  // Effect to manage the round timer
+  useEffect(() => {
+    if (session?.status !== 'playing' || !isHost) {
+      return;
+    }
+
+    setTimeLeft(session.timerDuration); // Reset timer
+
+    const timerInterval = setInterval(() => {
+      setTimeLeft(prevTime => {
+        if (prevTime <= 1) {
+          clearInterval(timerInterval);
+          // Host's client forces the round to end
+          if (isHost) {
+            const sessionRef = doc(db, 'sessions', sessionId);
+            updateDoc(sessionRef, { status: 'round_results' });
+          }
+          return 0;
+        }
+        return prevTime - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timerInterval);
+    // isHost is included because only the host should run the timer logic that updates Firestore
+  }, [session?.status, session?.currentQuestionIndex, session?.timerDuration, sessionId, isHost]);
+
 
   useEffect(() => {
     if (sessionId) { 
@@ -141,6 +174,7 @@ export default function SessionPage() {
             status: 'lobby',
             difficulty: difficultyFromQuery,
             numRounds: numQuestionsFromQuery,
+            timerDuration: ROUND_TIMER_SECONDS,
           };
           setDoc(sessionRef, newSession)
             .then(() => {
@@ -300,7 +334,6 @@ export default function SessionPage() {
   const currentPlayerHasAnswered = session && currentQuestion && currentPlayerId &&
     (session.allAnswers[currentQuestion.id] || []).some(ans => ans.playerId === currentPlayerId);
 
-  const isHost = session && currentPlayerId && session.players.length > 0 && session.players[0].id === currentPlayerId;
 
   if (session === undefined) { 
     return (
@@ -435,12 +468,20 @@ export default function SessionPage() {
               {session.players.find(p=>p.id === currentPlayerId)?.name}, who is most likely to...
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-8">
+          <CardContent className="space-y-6">
             <div className="text-center p-6 bg-secondary/50 rounded-lg min-h-[100px] flex items-center justify-center">
               <p className="text-xl md:text-2xl font-medium text-foreground">
                 <MessageSquare className="inline-block w-7 h-7 mr-2 mb-1 text-primary" />
                 {currentQuestion.text}
               </p>
+            </div>
+
+            <div className="space-y-4">
+                <div className="flex items-center gap-2 text-muted-foreground">
+                    <Timer className="w-5 h-5" />
+                    <span>Time Left: {timeLeft}s</span>
+                </div>
+                <Progress value={(timeLeft / session.timerDuration) * 100} className="w-full" />
             </div>
             
             {currentPlayerHasAnswered ? (
@@ -460,7 +501,7 @@ export default function SessionPage() {
                       size="lg"
                       className="text-lg justify-start p-4 h-auto hover:bg-primary/10 hover:border-primary transition-all duration-200"
                       onClick={() => handleSubmitAnswer(player.id)}
-                      disabled={isSubmitting}
+                      disabled={isSubmitting || timeLeft === 0}
                     >
                       <Avatar className="w-10 h-10 mr-3">
                          <AvatarImage src={`https://placehold.co/40x40/E3F2FD/9C27B0?text=${player.name.charAt(0).toUpperCase()}`} alt={player.name} data-ai-hint="letter avatar"/>

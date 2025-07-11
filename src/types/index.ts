@@ -39,4 +39,5 @@ export interface GameSession {
   hostId?: string; // ID of the player who can start the game (optional for simpler client-side)
   difficulty: QuestionDifficulty;
   numRounds: number;
+  timerDuration: number; // Duration of the timer in seconds for each round
 }
