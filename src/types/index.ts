@@ -38,4 +38,5 @@ export interface GameSession {
   status: GameStatus;
   hostId?: string; // ID of the player who can start the game (optional for simpler client-side)
   difficulty: QuestionDifficulty;
+  numRounds: number;
 }

@@ -13,7 +13,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useToast } from '@/hooks/use-toast';
 import { nanoid } from 'nanoid';
-import { Users, Play, Loader2, MessageSquare, Crown, Frown, Sparkles, ChevronsRight } from 'lucide-react';
+import { Users, Play, Loader2, MessageSquare, Crown, Frown, Sparkles, ChevronsRight, Info } from 'lucide-react';
 import { PREDEFINED_QUESTIONS } from '@/lib/questions';
 
 const MIN_PLAYERS = 2; 
@@ -130,6 +130,7 @@ export default function SessionPage() {
       } else {
         const isCreatingNew = searchParams.get('new') === 'true';
         const difficultyFromQuery = searchParams.get('difficulty') as QuestionDifficulty | null;
+        const numQuestionsFromQuery = parseInt(searchParams.get('numQuestions') || '10', 10);
         
         if (isCreatingNew && difficultyFromQuery) {
           const newSession: GameSession = {
@@ -140,6 +141,7 @@ export default function SessionPage() {
             currentQuestionIndex: 0,
             status: 'lobby',
             difficulty: difficultyFromQuery,
+            numRounds: numQuestionsFromQuery,
           };
           setDoc(sessionRef, newSession)
             .then(() => {
@@ -210,7 +212,7 @@ export default function SessionPage() {
     }
     setIsLoading(true);
     try {
-      const numQuestions = session.players.length * 2; 
+      const numQuestions = session.numRounds;
       const questionPool = PREDEFINED_QUESTIONS[session.difficulty];
       const selectedQuestions = shuffleAndPick(questionPool, numQuestions);
 
@@ -218,6 +220,10 @@ export default function SessionPage() {
         toast({ title: "No Questions Found", description: `There are no predefined questions for the "${session.difficulty}" difficulty.`, variant: "destructive" });
         setIsLoading(false);
         return;
+      }
+      
+      if (selectedQuestions.length < numQuestions) {
+        toast({ title: "Not Enough Questions", description: `Only ${selectedQuestions.length} questions available for this difficulty, but ${numQuestions} were requested.`, variant: "destructive" });
       }
 
       const questions: Question[] = selectedQuestions.map(qText => ({ id: nanoid(8), text: qText }));
@@ -336,7 +342,7 @@ export default function SessionPage() {
             <CardTitle className="text-3xl font-headline">Game Lobby</CardTitle>
             <CardDescription>
               Session ID: <span className="font-bold text-primary">{sessionId}</span> <br/>
-              Difficulty: <span className="font-semibold text-accent">{difficultyText[session.difficulty] || 'Not set'}</span>
+              Difficulty: <span className="font-semibold text-accent">{difficultyText[session.difficulty] || 'Not set'}</span> | Questions: <span className="font-semibold text-accent">{session.numRounds}</span>
             </CardDescription>
             <p className="text-sm text-muted-foreground">Share this ID with your friends to join!</p>
           </CardHeader>

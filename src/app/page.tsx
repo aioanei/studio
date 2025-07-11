@@ -10,17 +10,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import type { QuestionDifficulty } from '@/types';
 import { nanoid } from 'nanoid';
-import { PartyPopper, LogIn, Settings2 } from 'lucide-react';
+import { PartyPopper, LogIn, Settings2, ListOrdered } from 'lucide-react';
 
 export default function HomePage() {
   const [joinSessionId, setJoinSessionId] = useState('');
   const [selectedDifficulty, setSelectedDifficulty] = useState<QuestionDifficulty>('family-friendly');
+  const [numQuestions, setNumQuestions] = useState('10');
   const router = useRouter();
 
   const handleCreateSession = () => {
     const newSessionId = nanoid(6).toUpperCase();
-    // Pass difficulty as a query parameter
-    router.push(`/session/${newSessionId}?difficulty=${selectedDifficulty}&new=true`);
+    router.push(`/session/${newSessionId}?difficulty=${selectedDifficulty}&new=true&numQuestions=${numQuestions}`);
   };
 
   const handleJoinSession = (e: React.FormEvent) => {
@@ -50,11 +50,11 @@ export default function HomePage() {
               Create New Game
             </CardTitle>
             <CardDescription>
-              Start a new game session and invite your friends. Choose your question style below.
+              Start a new game session and invite your friends. Choose your game options below.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
+          <CardContent className="space-y-6">
+            <div className="space-y-2">
               <Label htmlFor="difficulty-select" className="text-lg font-medium flex items-center gap-1 mb-2">
                 <Settings2 className="w-5 h-5 text-muted-foreground" />
                 Question Difficulty
@@ -69,12 +69,29 @@ export default function HomePage() {
                   <SelectItem value="hot-seat-exclusive" className="text-lg">🌶️ Hot Seat Exclusive</SelectItem>
                 </SelectContent>
               </Select>
+               <p className="text-sm text-muted-foreground px-1">
+                {selectedDifficulty === 'family-friendly' && 'Fun and light-hearted questions suitable for everyone.'}
+                {selectedDifficulty === 'getting-personal' && 'A bit more revealing, great for close friends.'}
+                {selectedDifficulty === 'hot-seat-exclusive' && 'Daring and potentially NSFW questions for the bold!'}
+              </p>
             </div>
-            <p className="text-sm text-muted-foreground">
-              {selectedDifficulty === 'family-friendly' && 'Fun and light-hearted questions suitable for everyone.'}
-              {selectedDifficulty === 'getting-personal' && 'A bit more revealing, great for close friends.'}
-              {selectedDifficulty === 'hot-seat-exclusive' && 'Daring and potentially NSFW questions for the bold!'}
-            </p>
+             <div className="space-y-2">
+              <Label htmlFor="questions-select" className="text-lg font-medium flex items-center gap-1 mb-2">
+                <ListOrdered className="w-5 h-5 text-muted-foreground" />
+                Number of Questions
+              </Label>
+              <Select value={numQuestions} onValueChange={setNumQuestions}>
+                <SelectTrigger id="questions-select" className="w-full text-lg py-6">
+                  <SelectValue placeholder="Select number of questions" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="5" className="text-lg">5 Questions</SelectItem>
+                  <SelectItem value="10" className="text-lg">10 Questions</SelectItem>
+                  <SelectItem value="15" className="text-lg">15 Questions</SelectItem>
+                  <SelectItem value="20" className="text-lg">20 Questions</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </CardContent>
           <CardFooter>
             <Button
@@ -103,7 +120,7 @@ export default function HomePage() {
                 type="text"
                 value={joinSessionId}
                 onChange={(e) => setJoinSessionId(e.target.value.toUpperCase())}
-                placeholder="Enter Game ID (e.g., ABC123)"
+                placeholder="Enter Game ID (e.g., ABCDEF)"
                 className="text-lg py-6"
                 aria-label="Game ID to join"
                 maxLength={6}
