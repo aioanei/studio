@@ -12,12 +12,19 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { generateQuestions } from '@/ai/flows/generate-questions';
 import { useToast } from '@/hooks/use-toast';
 import { nanoid } from 'nanoid';
 import { Users, Play, Loader2, MessageSquare, Crown, Info, Frown } from 'lucide-react';
+import { PREDEFINED_QUESTIONS } from '@/lib/questions';
 
 const MIN_PLAYERS = 2; 
+
+// Helper function to shuffle an array and pick a certain number of items
+function shuffleAndPick<T>(array: T[], count: number): T[] {
+  const shuffled = array.sort(() => 0.5 - Math.random());
+  return shuffled.slice(0, count);
+}
+
 
 export default function SessionPage() {
   const params = useParams();
@@ -30,7 +37,7 @@ export default function SessionPage() {
   const [session, setSession] = useState<GameSession | null | undefined>(undefined); // undefined: loading, null: not found
   const [playerName, setPlayerName] = useState('');
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false); // For AI question generation
+  const [isLoading, setIsLoading] = useState(false); // For starting game
   const [isSubmitting, setIsSubmitting] = useState(false); // For answer submission
 
   const playerStorageKey = `hotseat-player-${sessionId}`;
@@ -139,11 +146,17 @@ export default function SessionPage() {
     }
     setIsLoading(true);
     try {
-      const playerNames = session.players.map(p => p.name);
-      const numQuestions = playerNames.length * 2; 
-      const aiResult = await generateQuestions({ playerNames, numQuestions, difficulty: session.difficulty });
-      
-      const questions: Question[] = aiResult.questions.map(qText => ({ id: nanoid(8), text: qText }));
+      const numQuestions = session.players.length * 2; 
+      const questionPool = PREDEFINED_QUESTIONS[session.difficulty];
+      const selectedQuestions = shuffleAndPick(questionPool, numQuestions);
+
+      if (selectedQuestions.length === 0) {
+        toast({ title: "No Questions Found", description: `There are no predefined questions for the "${session.difficulty}" difficulty.`, variant: "destructive" });
+        setIsLoading(false);
+        return;
+      }
+
+      const questions: Question[] = selectedQuestions.map(qText => ({ id: nanoid(8), text: qText }));
       
       const sessionRef = doc(db, 'sessions', sessionId);
       await updateDoc(sessionRef, {
@@ -154,8 +167,8 @@ export default function SessionPage() {
       });
       toast({ title: "Game Started!", description: "Let the fun begin!" });
     } catch (error) {
-      console.error("Failed to generate questions:", error);
-      toast({ title: "Error starting game", description: "Could not generate questions. Please try again.", variant: "destructive" });
+      console.error("Failed to start game:", error);
+      toast({ title: "Error starting game", description: "Could not set up the game questions. Please try again.", variant: "destructive" });
     } finally {
       setIsLoading(false);
     }
